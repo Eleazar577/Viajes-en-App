@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>TrackPilot Driver Pro - Telemetría & Rentabilidad GPS (MXN)</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              400: '#22d3ee',
+              500: '#06b6d4',
+              600: '#0891b2',
+            },
+            driver: {
+              card: '#0f172a',
+              border: '#1e293b',
+              glow: '#10b981'
+            }
+          },
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Estilos de mapa y pulso de radar GPS */
+    .leaflet-container {
+      background-color: #050811 !important;
+      font-family: inherit;
+    }
+    .gps-marker-pulse {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      background: #10b981;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 0 16px rgba(16, 185, 129, 0.9);
+    }
+    .gps-marker-pulse::after {
+      content: '';
+      position: absolute;
+      top: -11px;
+      left: -11px;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.35);
+      animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.5); opacity: 0.9; }
+      80%, 100% { transform: scale(2.2); opacity: 0; }
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #253347;
+      border-radius: 4px;
+    }
+    .leaflet-bar a {
+      background-color: #0f172a !important;
+      color: #94a3b8 !important;
+      border-bottom: 1px solid #1e293b !important;
+    }
+    .leaflet-bar a:hover {
+      background-color: #1e293b !important;
+      color: #f8fafc !important;
+    }
+    .leaflet-control-attribution {
+      background: rgba(15, 23, 42, 0.85) !important;
+      color: #64748b !important;
+      font-size: 10px !important;
+    }
+    .no-spin::-webkit-inner-spin-button,
+    .no-spin::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .no-spin {
+      -moz-appearance: textfield;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 h-full flex flex-col overflow-hidden font-sans select-none">
+  <!-- Header / HUD Top Bar -->
+  <header class="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-30 px-3.5 py-2.5 flex items-center justify-between shrink-0 shadow-lg">
+    <div class="flex items-center space-x-2.5">
+      <div class="bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 p-2 rounded-xl text-white shadow-md shadow-emerald-950/60">
+        <i data-lucide="navigation" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <div class="flex items-center space-x-1.5">
+          <h1 class="text-sm sm:text-base font-extrabold tracking-tight text-white">TrackPilot <span class="text-emerald-400 font-mono text-xs px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60">DRIVER MX</span></h1>
+          <span id="gpsBadge" class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+            <span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-slate-500" id="gpsStatusDot"></span>
+            <span id="gpsStatusText">GPS Inactivo</span>
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 hidden md:block">Gestión de ruta, telemetría y rentabilidad neta en tiempo real</p>
+      </div>
+    </div>
+
+    <!-- Quick Buttons: Cost Settings, Shift Stats & History -->
+    <div class="flex items-center space-x-1.5 sm:space-x-2">
+      <!-- Quick Operational Cost pill -->
+      <button id="btnQuickCost" title="Costo vehicular por kilómetro" class="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs font-mono text-slate-300 hover:border-emerald-500 transition">
+        <i data-lucide="fuel" class="w-3.5 h-3.5 text-amber-400"></i>
+        <span>Costo/km: <strong id="lblCostPerKmSummary" class="text-emerald-400">$0.00</strong></span>
+      </button>
+
+      <button id="btnOpenConfig" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center gap-1.5 transition active:scale-95">
+        <i data-lucide="settings" class="w-4 h-4 text-emerald-400"></i>
+        <span class="hidden sm:inline">Costos</span>
+      </button>
+
+      <button id="btnOpenShiftModal" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center gap-1.5 transition active:scale-95">
+        <i data-lucide="wallet" class="w-4 h-4 text-cyan-400"></i>
+        <span class="hidden sm:inline">Turno</span>
+      </button>
+
+      <button id="btnOpenHistory" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center gap-1.5 transition active:scale-95">
+        <i data-lucide="archive" class="w-4 h-4 text-indigo-400"></i>
+        <span class="hidden sm:inline">Historial</span>
+        <span id="historyBadgeCount" class="bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded-full text-[10px]">0</span>
+      </button>
+
+      <button id="btnToggleSimModal" class="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-300 flex items-center gap-1 transition active:scale-95">
+        <i data-lucide="play-circle" class="w-4 h-4"></i>
+        <span class="hidden md:inline">Demo</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-1 relative flex flex-col md:flex-row overflow-hidden">
+    <!-- Map Viewport -->
+    <div id="map" class="w-full h-full flex-1 z-0 relative">
+      <!-- Overlay Floating Controls -->
+      <div class="absolute top-4 right-4 z-[1000] flex flex-col gap-2">
+        <button id="btnCenterMap" title="Centrar vehículo" class="p-2.5 rounded-xl bg-slate-900/90 text-slate-200 hover:text-white hover:bg-slate-800 border border-slate-700 shadow-xl transition active:scale-95">
+          <i data-lucide="crosshair" class="w-5 h-5"></i>
+        </button>
+        <button id="btnToggleLayer" title="Cambiar tema cartográfico" class="p-2.5 rounded-xl bg-slate-900/90 text-slate-200 hover:text-white hover:bg-slate-800 border border-slate-700 shadow-xl transition active:scale-95">
+          <i data-lucide="layers" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- In-Map Toast Alert -->
+      <div id="toastNotification" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] transition-all duration-300 opacity-0 pointer-events-none transform -translate-y-2">
+        <div class="bg-slate-900/95 text-slate-100 text-xs py-2 px-4 rounded-full border border-emerald-500/40 shadow-2xl flex items-center gap-2 backdrop-blur-md">
+          <i data-lucide="info" class="w-4 h-4 text-emerald-400"></i>
+          <span id="toastMessage">Notificación</span>
+        </div>
+      </div>
+    </div>
+
+    <aside id="telemetrySidebar" class="w-full md:w-96 bg-slate-900/95 backdrop-blur-lg border-t md:border-t-0 md:border-l border-slate-800 flex flex-col z-20 transition-all duration-300 max-h-[50vh] md:max-h-full overflow-y-auto">
+      <!-- Live Cost Ticker & Key Metrics -->
+      <div class="p-3.5 bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-slate-900 border-b border-slate-800 shrink-0">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+            <i data-lucide="coins" class="w-4 h-4 text-emerald-400"></i> Costo Operativo en Ruta
+          </span>
+          <span class="text-[10px] text-slate-400 font-mono">GAS + MTTO</span>
+        </div>
+        <div class="mt-1 flex items-baseline justify-between">
+          <div class="flex items-baseline gap-1">
+            <span class="text-xs text-emerald-400 font-bold">$</span>
+            <span id="txtLiveTripCost" class="text-3xl font-black font-mono tracking-tight text-emerald-300">0.00</span>
+            <span class="text-xs font-semibold text-slate-400">MXN</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] text-slate-400 block">Tasa km actual</span>
+            <span id="txtLiveRatePerKm" class="text-xs font-mono font-semibold text-slate-200">$0.00 /km</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Primary Metrics Grid -->
+      <div class="p-3.5 grid grid-cols-2 gap-2.5 border-b border-slate-800 shrink-0">
+        <!-- Speed Metric -->
+        <div class="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <span class="flex items-center gap-1"><i data-lucide="gauge" class="w-3.5 h-3.5 text-cyan-400"></i> VELOCIDAD</span>
+          </div>
+          <div class="mt-1 flex items-baseline">
+            <span id="txtCurrentSpeed" class="text-3xl font-black font-mono text-white">0.0</span>
+            <span class="ml-1 text-xs font-semibold text-cyan-400">km/h</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1 flex justify-between font-mono">
+            <span>Media:</span>
+            <span id="txtAvgSpeed" class="text-slate-200">0.0 km/h</span>
+          </div>
+        </div>
+
+        <!-- Distance Metric -->
+        <div class="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <span class="flex items-center gap-1"><i data-lucide="milestone" class="w-3.5 h-3.5 text-emerald-400"></i> DISTANCIA</span>
+          </div>
+          <div class="mt-1 flex items-baseline">
+            <span id="txtDistanceKm" class="text-3xl font-black font-mono text-white">0.00</span>
+            <span class="ml-1 text-xs font-semibold text-emerald-400">km</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1 flex justify-between font-mono">
+            <span>Metros:</span>
+            <span id="txtDistanceMeters" class="text-slate-200">0 m</span>
+          </div>
+        </div>
+
+        <!-- Chronometer -->
+        <div class="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <span class="flex items-center gap-1"><i data-lucide="timer" class="w-3.5 h-3.5 text-amber-400"></i> TIEMPO</span>
+            <span id="recordIndicator" class="w-2 h-2 rounded-full bg-slate-600"></span>
+          </div>
+          <div class="mt-1">
+            <span id="txtDuration" class="text-2xl font-bold font-mono tracking-wider text-white">00:00:00</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1 flex justify-between font-mono">
+            <span>Estado:</span>
+            <span id="txtTripStatus" class="text-slate-300">Detenido</span>
+          </div>
+        </div>
+
+        <!-- Elevation / Altitude -->
+        <div class="bg-slate-950/70 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+          <div class="flex items-center justify-between text-slate-400 text-xs font-medium">
+            <span class="flex items-center gap-1"><i data-lucide="mountain" class="w-3.5 h-3.5 text-purple-400"></i> ELEVACIÓN</span>
+          </div>
+          <div class="mt-1 flex items-baseline">
+            <span id="txtAltitude" class="text-2xl font-bold font-mono text-white">---</span>
+            <span class="ml-1 text-xs font-semibold text-purple-400">m</span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-1 flex justify-between font-mono">
+            <span>GPS:</span>
+            <span id="txtAccuracy" class="text-slate-300">-- m</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-time Chart Section -->
+      <div class="p-3.5 flex-1 flex flex-col min-h-[160px]">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <i data-lucide="trending-up" class="w-3.5 h-3.5 text-cyan-400"></i> Curva de Velocidad
+          </h3>
+          <span id="txtWaypointsCount" class="text-[10px] font-mono text-slate-500">0 pts</span>
+        </div>
+        <div class="relative flex-1 bg-slate-950/80 rounded-xl p-2.5 border border-slate-800 min-h-[110px]">
+          <canvas id="telemetryChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Location Footer -->
+      <div class="px-4 py-2 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+        <span class="flex items-center gap-1 truncate max-w-[240px]">
+          <i data-lucide="map-pin" class="w-3 h-3 text-emerald-400 shrink-0"></i>
+          <span id="txtCoords">Lat: --.----, Lng: --.----</span>
+        </span>
+        <span class="text-emerald-400 font-semibold">MXN $</span>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 z-30 shrink-0">
+    <div class="max-w-3xl mx-auto flex items-center justify-center gap-3">
+      <!-- Start / Resume Button -->
+      <button id="btnStart" class="flex-1 max-w-[220px] h-12 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 transition">
+        <i data-lucide="play" class="w-5 h-5 fill-current"></i>
+        <span id="btnStartLabel">Iniciar Ruta</span>
+      </button>
+
+      <!-- Pause Button -->
+      <button id="btnPause" disabled class="flex-1 max-w-[160px] h-12 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 text-amber-300 border border-slate-700 font-semibold rounded-xl flex items-center justify-center gap-2 transition">
+        <i data-lucide="pause" class="w-5 h-5"></i>
+        <span>Pausar</span>
+      </button>
+
+      <!-- Stop & Settle Trip Button -->
+      <button id="btnStop" disabled class="flex-1 max-w-[200px] h-12 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2 transition">
+        <i data-lucide="check-circle" class="w-5 h-5"></i>
+        <span>Finalizar & Cobrar</span>
+      </button>
+    </div>
+  </footer>
+
+  <div id="modalConfig" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <i data-lucide="sliders" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-white">Parámetros de Costos del Vehículo</h2>
+            <p class="text-xs text-slate-400">Ajusta tus gastos para calcular la ganancia neta real en pesos</p>
+          </div>
+        </div>
+        <button id="btnCloseConfig" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Form Body -->
+      <div class="p-5 overflow-y-auto space-y-4">
+        <!-- Combustible Section -->
+        <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <i data-lucide="fuel" class="w-4 h-4"></i> Combustible & Rendimiento
+          </h3>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-300 font-medium mb-1">Rendimiento Vehicular</label>
+              <div class="relative">
+                <input type="number" step="0.1" id="cfgFuelEfficiency" class="no-spin w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-emerald-500">
+                <span class="absolute right-3 top-2 text-xs font-semibold text-slate-500">km / L</span>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-1">Ej. Sedán compacto 12 - 15 km/L</p>
+            </div>
+
+            <div>
+              <label class="block text-xs text-slate-300 font-medium mb-1">Precio de Gasolina</label>
+              <div class="relative">
+                <input type="number" step="0.1" id="cfgFuelPrice" class="no-spin w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-emerald-500">
+                <span class="absolute right-3 top-2 text-xs font-semibold text-slate-500">$ MXN / L</span>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-1">Promedio Regular / Magna (~$24.50)</p>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
+            <span class="text-slate-400">Gasto directo de gasolina:</span>
+            <span id="cfgFuelCostCalculated" class="text-amber-400 font-bold">$0.00 MXN / km</span>
+          </div>
+        </div>
+
+        <!-- Mantenimiento y Desgaste -->
+        <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+            <i data-lucide="wrench" class="w-4 h-4"></i> Desgaste y Mantenimiento
+          </h3>
+
+          <div>
+            <label class="block text-xs text-slate-300 font-medium mb-1">Reserva para Mtto & Llantas por km</label>
+            <div class="relative">
+              <input type="number" step="0.05" id="cfgMaintenancePerKm" class="no-spin w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-emerald-500">
+              <span class="absolute right-3 top-2 text-xs font-semibold text-slate-500">$ MXN / km</span>
+            </div>
+            <p class="text-[10px] text-slate-500 mt-1">Cubre cambios de aceite, balatas, amortiguadores y llantas ($0.70 - $1.20)</p>
+          </div>
+        </div>
+
+        <!-- Comisión de la Plataforma -->
+        <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+            <i data-lucide="percent" class="w-4 h-4"></i> Comisión de la Aplicación
+          </h3>
+
+          <div>
+            <label class="block text-xs text-slate-300 font-medium mb-1">Porcentaje de Retención / Comisión</label>
+            <div class="relative">
+              <input type="number" step="0.1" id="cfgAppCommissionPct" class="no-spin w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-emerald-500">
+              <span class="absolute right-3 top-2 text-xs font-semibold text-slate-500">%</span>
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button type="button" class="btn-quick-comm px-2 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 text-slate-300" data-val="16.23">Uber (~16.2%)</button>
+              <button type="button" class="btn-quick-comm px-2 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 text-slate-300" data-val="20.0">DiDi (20%)</button>
+              <button type="button" class="btn-quick-comm px-2 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 text-slate-300" data-val="25.0">25% Fijo</button>
+              <button type="button" class="btn-quick-comm px-2 py-1 text-[11px] bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 text-slate-300" data-val="0.0">Particular (0%)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Resumen de Costo Operativo Total -->
+        <div class="p-3.5 bg-emerald-950/30 border border-emerald-800/50 rounded-xl flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-300 font-sans font-medium">Costo Operativo Base x Kilómetro:</span>
+          <span id="cfgTotalCostPerKm" class="text-emerald-400 font-black text-sm">$0.00 MXN / km</span>
+        </div>
+      </div>
+
+      <!-- Footer Buttons -->
+      <div class="px-5 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+        <button id="btnResetConfig" class="px-3.5 py-2 text-xs font-semibold text-slate-400 hover:text-white transition">Restablecer valores</button>
+        <button id="btnSaveConfig" class="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl shadow-lg shadow-emerald-950/50 transition">Guardar Configuración</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalSettleTrip" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <!-- Modal Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center gap-2.5">
+          <div class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+            <i data-lucide="receipt" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-base font-bold text-white">Cierre de Viaje & Balance Financiero</h2>
+            <p class="text-xs text-slate-400">Ingresa el cobro total para auditar tu ganancia neta en mano</p>
+          </div>
+        </div>
+        <button id="btnDismissSettle" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-5 overflow-y-auto space-y-4">
+        <!-- Trip Trip Metrics Summary -->
+        <div class="grid grid-cols-3 gap-2 text-center bg-slate-950/70 p-3 rounded-xl border border-slate-800 font-mono text-xs">
+          <div>
+            <span class="text-slate-500 block text-[10px]">DISTANCIA</span>
+            <span id="settleTripDistance" class="font-bold text-white text-sm">0.00 km</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px]">DURACIÓN</span>
+            <span id="settleTripDuration" class="font-bold text-white text-sm">00:00:00</span>
+          </div>
+          <div>
+            <span class="text-slate-500 block text-[10px]">VEL. MEDIA</span>
+            <span id="settleTripAvgSpeed" class="font-bold text-white text-sm">0.0 km/h</span>
+          </div>
+        </div>
+
+        <!-- Input Tarifa Cobrada -->
+        <div class="space-y-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-emerald-400">Monto Cobrado al Pasajero / Tarifa Bruta</label>
+          <div class="relative">
+            <span class="absolute left-3.5 top-2.5 text-xl font-bold font-mono text-emerald-400">$</span>
+            <input type="number" step="1.0" min="0" id="settleGrossFare" placeholder="0.00" class="no-spin w-full bg-slate-950 border-2 border-emerald-500/60 focus:border-emerald-400 rounded-xl pl-8 pr-16 py-2.5 text-2xl font-black font-mono text-white focus:outline-none">
+            <span class="absolute right-3.5 top-3.5 text-xs font-bold text-slate-400">MXN</span>
+          </div>
+        </div>
+
+        <!-- Payment Method -->
+        <div>
+          <label class="block text-xs text-slate-300 font-medium mb-1.5">Método de Cobro</label>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="cursor-pointer">
+              <input type="radio" name="payMethod" value="Efectivo" checked class="peer sr-only">
+              <div class="p-2.5 rounded-xl border border-slate-700 bg-slate-950 text-center peer-checked:border-emerald-500 peer-checked:bg-emerald-950/40 text-xs font-semibold text-slate-300 peer-checked:text-emerald-300 transition">
+                <i data-lucide="banknote" class="w-4 h-4 mx-auto mb-1 text-emerald-400"></i> Efectivo
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="payMethod" value="App / Tarjeta" class="peer sr-only">
+              <div class="p-2.5 rounded-xl border border-slate-700 bg-slate-950 text-center peer-checked:border-cyan-500 peer-checked:bg-cyan-950/40 text-xs font-semibold text-slate-300 peer-checked:text-cyan-300 transition">
+                <i data-lucide="credit-card" class="w-4 h-4 mx-auto mb-1 text-cyan-400"></i> App / Tarjeta
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="payMethod" value="Transferencia" class="peer sr-only">
+              <div class="p-2.5 rounded-xl border border-slate-700 bg-slate-950 text-center peer-checked:border-indigo-500 peer-checked:bg-indigo-950/40 text-xs font-semibold text-slate-300 peer-checked:text-indigo-300 transition">
+                <i data-lucide="smartphone" class="w-4 h-4 mx-auto mb-1 text-indigo-400"></i> Transferencia
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Live Breakdown Table -->
+        <div class="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800 space-y-2 text-xs font-mono">
+          <div class="flex justify-between items-center text-slate-400">
+            <span>Tarifa Bruta Inicial:</span>
+            <span id="bdGrossFare" class="font-bold text-white">$0.00 MXN</span>
+          </div>
+
+          <div class="flex justify-between items-center text-rose-400">
+            <span class="flex items-center gap-1"><i data-lucide="arrow-down-right" class="w-3.5 h-3.5"></i> Comisión Plataforma (<span id="bdCommPctLabel">0</span>%):</span>
+            <span id="bdCommissionDeduction" class="font-semibold">-$0.00 MXN</span>
+          </div>
+
+          <div class="flex justify-between items-center text-amber-400">
+            <span class="flex items-center gap-1"><i data-lucide="arrow-down-right" class="w-3.5 h-3.5"></i> Combustible consumido:</span>
+            <span id="bdFuelDeduction" class="font-semibold">-$0.00 MXN</span>
+          </div>
+
+          <div class="flex justify-between items-center text-purple-400">
+            <span class="flex items-center gap-1"><i data-lucide="arrow-down-right" class="w-3.5 h-3.5"></i> Desgaste y mantenimiento:</span>
+            <span id="bdMaintDeduction" class="font-semibold">-$0.00 MXN</span>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-sans">
+            <span class="font-bold text-emerald-400">Ganancia Neta en Bolsillo:</span>
+            <span id="bdNetProfit" class="font-black font-mono text-base text-emerald-300">$0.00 MXN</span>
+          </div>
+
+          <!-- Productivity Indicators -->
+          <div class="pt-2 border-t border-slate-800/80 grid grid-cols-3 gap-2 text-center text-[11px] text-slate-400">
+            <div>
+              <span class="block text-[10px] text-slate-500">NETO / KM</span>
+              <span id="bdNetPerKm" class="font-bold text-slate-200">$0.00/km</span>
+            </div>
+            <div>
+              <span class="block text-[10px] text-slate-500">NETO / HORA</span>
+              <span id="bdNetPerHour" class="font-bold text-slate-200">$0.00/h</span>
+            </div>
+            <div>
+              <span class="block text-[10px] text-slate-500">RENTABILIDAD</span>
+              <span id="bdProfitMargin" class="font-bold text-emerald-400">0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Footer -->
+      <div class="px-5 py-3.5 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2.5">
+        <button id="btnCancelSettle" class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition">Regresar al viaje</button>
+        <button id="btnConfirmSaveTrip" class="px-5 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl shadow-lg shadow-emerald-950/50 flex items-center gap-1.5 transition">
+          <i data-lucide="save" class="w-4 h-4"></i> Guardar en Historial
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalShift" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center gap-2">
+          <i data-lucide="pie-chart" class="w-5 h-5 text-cyan-400"></i>
+          <h2 class="text-base font-bold text-white">Resumen del Turno Actual</h2>
+        </div>
+        <button id="btnCloseShift" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4">
+        <!-- Main Net Card -->
+        <div class="bg-emerald-950/30 border border-emerald-800/50 rounded-2xl p-4 text-center">
+          <span class="text-xs uppercase tracking-wider font-semibold text-emerald-400 block mb-1">Total Neto Ganado</span>
+          <div class="text-3xl font-black font-mono text-emerald-300" id="shiftNetTotal">$0.00 MXN</div>
+          <span class="text-[11px] text-slate-400 mt-1 block">Dinero libre de comisiones y gasolina</span>
+        </div>
+
+        <!-- Shift Grid Stats -->
+        <div class="grid grid-cols-2 gap-2.5 text-xs font-mono">
+          <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span class="text-slate-400 block text-[10px]">TOTAL BRUTO</span>
+            <span id="shiftGrossTotal" class="text-sm font-bold text-white">$0.00</span>
+          </div>
+          <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span class="text-slate-400 block text-[10px]">COMISIONES APP</span>
+            <span id="shiftCommissionsTotal" class="text-sm font-bold text-rose-400">-$0.00</span>
+          </div>
+          <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span class="text-slate-400 block text-[10px]">GASTOS VEHICULARES</span>
+            <span id="shiftOperCostsTotal" class="text-sm font-bold text-amber-400">-$0.00</span>
+          </div>
+          <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+            <span class="text-slate-400 block text-[10px]">KM TOTALES</span>
+            <span id="shiftDistanceTotal" class="text-sm font-bold text-cyan-400">0.00 km</span>
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-400">Ganancia neta promedio / km:</span>
+          <span id="shiftAvgNetPerKm" class="font-bold text-emerald-400">$0.00 /km</span>
+        </div>
+      </div>
+
+      <div class="p-4 bg-slate-950/60 border-t border-slate-800 flex justify-end">
+        <button id="btnDismissShift" class="px-4 py-2 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalHistory" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center gap-2">
+          <i data-lucide="archive" class="w-5 h-5 text-indigo-400"></i>
+          <h2 class="text-base font-bold text-white">Historial de Rutas & Cobros</h2>
+        </div>
+        <button id="btnCloseHistory" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-5 flex-1 overflow-y-auto space-y-3" id="historyListContainer">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <div class="px-5 py-3.5 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between text-xs">
+        <span id="historyTotalStats" class="text-slate-400">0 rutas almacenadas</span>
+        <button id="btnClearAllHistory" class="text-rose-400 hover:text-rose-300 font-medium transition">Borrar historial completo</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalSimulator" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div class="flex items-center gap-2">
+          <i data-lucide="navigation-2" class="w-5 h-5 text-indigo-400"></i>
+          <h2 class="text-base font-bold text-white">Simulador de Rutas de Prueba</h2>
+        </div>
+        <button id="btnCloseSimModal" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4">
+        <p class="text-xs text-slate-300 leading-relaxed">
+          Genera trayectos sintéticos en tiempo real para verificar el cálculo del costo operativo por km y las ganancias netas sin mover el vehículo.
+        </p>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Escenario Predefinido</label>
+          <select id="simScenarioSelect" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500">
+            <option value="cdmx_reforma">CDMX: Paseo de la Reforma & Polanco (Urbano)</option>
+            <option value="gdl_chapultepec">Guadalajara: Av. Chapultepec - Minerva (Fluido)</option>
+            <option value="mty_sanpedro">Monterrey: San Pedro Garza García (Pendiente / Rápido)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Velocidad del Vehículo Simulado</label>
+          <div class="flex items-center gap-3">
+            <input type="range" id="simSpeedSlider" min="25" max="110" value="50" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-400">
+            <span id="simSpeedValue" class="text-xs font-mono font-bold text-emerald-300 w-16 text-right">50 km/h</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 bg-slate-950/60 border-t border-slate-800 flex justify-end gap-2">
+        <button id="btnCancelSim" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition">Cancelar</button>
+        <button id="btnApplySim" class="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition">Activar Simulación</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    lucide.createIcons();
+
+    // Default Vehicle & Platform Cost Configuration
+    const DefaultConfig = {
+      fuelEfficiencyKmPerL: 13.5, // 13.5 km por litro
+      fuelPricePerLiter: 24.80,    // $24.80 MXN / litro
+      maintenancePerKm: 0.85,      // $0.85 MXN / km (llantas, servicios, depreciación)
+      appCommissionPct: 16.23      // 16.23% (Uber / estándar con IVA)
+    };
+
+    // Global Application State
+    const AppState = {
+      isRecording: false,
+      isPaused: false,
+      isSimulation: false,
+      startTime: null,
+      elapsedOffset: 0,
+      timerInterval: null,
+      watchId: null,
+      currentPosition: null,
+      routePoints: [],
+      totalDistance: 0, // meters
+      totalRecordedSpeedPoints: 0,
+      sumSpeed: 0,
+      maxSpeed: 0,
+      config: { ...DefaultConfig },
+      savedRoutes: [],
+      mapTileIndex: 0
+    };
+
+    // DOM Element References
+    const el = {
+      btnStart: document.getElementById('btnStart'),
+      btnStartLabel: document.getElementById('btnStartLabel'),
+      btnPause: document.getElementById('btnPause'),
+      btnStop: document.getElementById('btnStop'),
+      btnCenterMap: document.getElementById('btnCenterMap'),
+      btnToggleLayer: document.getElementById('btnToggleLayer'),
+      btnOpenConfig: document.getElementById('btnOpenConfig'),
+      btnCloseConfig: document.getElementById('btnCloseConfig'),
+      btnSaveConfig: document.getElementById('btnSaveConfig'),
+      btnResetConfig: document.getElementById('btnResetConfig'),
+      btnQuickCost: document.getElementById('btnQuickCost'),
+      modalConfig: document.getElementById('modalConfig'),
+      lblCostPerKmSummary: document.getElementById('lblCostPerKmSummary'),
+      cfgFuelEfficiency: document.getElementById('cfgFuelEfficiency'),
+      cfgFuelPrice: document.getElementById('cfgFuelPrice'),
+      cfgMaintenancePerKm: document.getElementById('cfgMaintenancePerKm'),
+      cfgAppCommissionPct: document.getElementById('cfgAppCommissionPct'),
+      cfgFuelCostCalculated: document.getElementById('cfgFuelCostCalculated'),
+      cfgTotalCostPerKm: document.getElementById('cfgTotalCostPerKm'),
+      // Telemetry HUD
+      txtLiveTripCost: document.getElementById('txtLiveTripCost'),
+      txtLiveRatePerKm: document.getElementById('txtLiveRatePerKm'),
+      txtCurrentSpeed: document.getElementById('txtCurrentSpeed'),
+      txtAvgSpeed: document.getElementById('txtAvgSpeed'),
+      txtDistanceKm: document.getElementById('txtDistanceKm'),
+      txtDistanceMeters: document.getElementById('txtDistanceMeters'),
+      txtDuration: document.getElementById('txtDuration'),
+      txtTripStatus: document.getElementById('txtTripStatus'),
+      txtAltitude: document.getElementById('txtAltitude'),
+      txtAccuracy: document.getElementById('txtAccuracy'),
+      txtCoords: document.getElementById('txtCoords'),
+      txtWaypointsCount: document.getElementById('txtWaypointsCount'),
+      recordIndicator: document.getElementById('recordIndicator'),
+      gpsStatusDot: document.getElementById('gpsStatusDot'),
+      gpsStatusText: document.getElementById('gpsStatusText'),
+      gpsBadge: document.getElementById('gpsBadge'),
+      toastNotification: document.getElementById('toastNotification'),
+      toastMessage: document.getElementById('toastMessage'),
+      // Settle Trip Modal
+      modalSettleTrip: document.getElementById('modalSettleTrip'),
+      btnDismissSettle: document.getElementById('btnDismissSettle'),
+      btnCancelSettle: document.getElementById('btnCancelSettle'),
+      btnConfirmSaveTrip: document.getElementById('btnConfirmSaveTrip'),
+      settleTripDistance: document.getElementById('settleTripDistance'),
+      settleTripDuration: document.getElementById('settleTripDuration'),
+      settleTripAvgSpeed: document.getElementById('settleTripAvgSpeed'),
+      settleGrossFare: document.getElementById('settleGrossFare'),
+      bdGrossFare: document.getElementById('bdGrossFare'),
+      bdCommPctLabel: document.getElementById('bdCommPctLabel'),
+      bdCommissionDeduction: document.getElementById('bdCommissionDeduction'),
+      bdFuelDeduction: document.getElementById('bdFuelDeduction'),
+      bdMaintDeduction: document.getElementById('bdMaintDeduction'),
+      bdNetProfit: document.getElementById('bdNetProfit'),
+      bdNetPerKm: document.getElementById('bdNetPerKm'),
+      bdNetPerHour: document.getElementById('bdNetPerHour'),
+      bdProfitMargin: document.getElementById('bdProfitMargin'),
+      // Shift Modal
+      btnOpenShiftModal: document.getElementById('btnOpenShiftModal'),
+      btnCloseShift: document.getElementById('btnCloseShift'),
+      btnDismissShift: document.getElementById('btnDismissShift'),
+      modalShift: document.getElementById('modalShift'),
+      shiftNetTotal: document.getElementById('shiftNetTotal'),
+      shiftGrossTotal: document.getElementById('shiftGrossTotal'),
+      shiftCommissionsTotal: document.getElementById('shiftCommissionsTotal'),
+      shiftOperCostsTotal: document.getElementById('shiftOperCostsTotal'),
+      shiftDistanceTotal: document.getElementById('shiftDistanceTotal'),
+      shiftAvgNetPerKm: document.getElementById('shiftAvgNetPerKm'),
+      // History Modal
+      btnOpenHistory: document.getElementById('btnOpenHistory'),
+      btnCloseHistory: document.getElementById('btnCloseHistory'),
+      modalHistory: document.getElementById('modalHistory'),
+      historyListContainer: document.getElementById('historyListContainer'),
+      historyTotalStats: document.getElementById('historyTotalStats'),
+      historyBadgeCount: document.getElementById('historyBadgeCount'),
+      btnClearAllHistory: document.getElementById('btnClearAllHistory'),
+      // Simulator Modal
+      btnToggleSimModal: document.getElementById('btnToggleSimModal'),
+      btnCloseSimModal: document.getElementById('btnCloseSimModal'),
+      btnCancelSim: document.getElementById('btnCancelSim'),
+      btnApplySim: document.getElementById('btnApplySim'),
+      modalSimulator: document.getElementById('modalSimulator'),
+      simScenarioSelect: document.getElementById('simScenarioSelect'),
+      simSpeedSlider: document.getElementById('simSpeedSlider'),
+      simSpeedValue: document.getElementById('simSpeedValue')
+    };
+
+    const baseLayers = [
+      {
+        name: 'Dark Matter (Nocturno)',
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        attribution: '&copy; CARTO &copy; OpenStreetMap'
+      },
+      {
+        name: 'OSM Carto Light',
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '&copy; OpenStreetMap contributors'
+      }
+    ];
+
+    // Default center: Paseo de la Reforma / El Ángel, CDMX
+    const defaultCoords = [19.427021, -99.167665];
+    const map = L.map('map', {
+      center: defaultCoords,
+      zoom: 15,
+      zoomControl: false
+    });
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    let currentTileLayer = L.tileLayer(baseLayers[0].url, {
+      attribution: baseLayers[0].attribution,
+      maxZoom: 19
+    }).addTo(map);
+
+    const userMarkerIcon = L.divIcon({
+      className: 'custom-gps-icon',
+      html: '<div class="gps-marker-pulse"></div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11]
+    });
+
+    const userMarker = L.marker(defaultCoords, { icon: userMarkerIcon }).addTo(map);
+    const accuracyCircle = L.circle(defaultCoords, {
+      radius: 18,
+      color: '#10b981',
+      weight: 1,
+      fillColor: '#10b981',
+      fillOpacity: 0.15
+    }).addTo(map);
+
+    const routePolyline = L.polyline([], {
+      color: '#10b981',
+      weight: 5,
+      opacity: 0.95,
+      lineJoin: 'round',
+      lineCap: 'round',
+      smoothFactor: 1.0
+    }).addTo(map);
+
+    let historyPolyline = null;
+
+    const chartCtx = document.getElementById('telemetryChart').getContext('2d');
+    const telemetryChart = new Chart(chartCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Velocidad (km/h)',
+          data: [],
+          borderColor: '#10b981',
+          borderWidth: 2,
+          pointRadius: 0,
+          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 200 },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              label: (ctx) => `${ctx.parsed.y.toFixed(1)} km/h`
+            }
+          }
+        },
+        scales: {
+          x: { display: false },
+          y: {
+            min: 0,
+            suggestedMax: 65,
+            grid: { color: '#1e293b' },
+            ticks: {
+              color: '#64748b',
+              font: { size: 9, family: 'monospace' }
+            }
+          }
+        }
+      }
+    });
+
+    function calculateFuelCostPerKm() {
+      const eff = parseFloat(AppState.config.fuelEfficiencyKmPerL) || 1;
+      const price = parseFloat(AppState.config.fuelPricePerLiter) || 0;
+      return price / eff;
+    }
+
+    function calculateTotalCostPerKm() {
+      const fuelCost = calculateFuelCostPerKm();
+      const maintCost = parseFloat(AppState.config.maintenancePerKm) || 0;
+      return fuelCost + maintCost;
+    }
+
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371e3; // meters
+      const phi1 = lat1 * Math.PI / 180;
+      const phi2 = lat2 * Math.PI / 180;
+      const dPhi = (lat2 - lat1) * Math.PI / 180;
+      const dLambda = (lon2 - lon1) * Math.PI / 180;
+
+      const a = Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function formatTime(milliseconds) {
+      const totalSeconds = Math.floor(milliseconds / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    }
+
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+        minimumFractionDigits: 2
+      }).format(amount);
+    }
+
+    function showToast(message) {
+      el.toastMessage.textContent = message;
+      el.toastNotification.classList.remove('opacity-0', '-translate-y-2');
+      el.toastNotification.classList.add('opacity-100', 'translate-y-0');
+      setTimeout(() => {
+        el.toastNotification.classList.remove('opacity-100', 'translate-y-0');
+        el.toastNotification.classList.add('opacity-0', '-translate-y-2');
+      }, 3000);
+    }
+
+    function updateGpsStatusUI(status, message) {
+      el.gpsStatusText.textContent = message;
+      el.gpsStatusDot.className = 'w-1.5 h-1.5 mr-1.5 rounded-full';
+
+      if (status === 'active') {
+        el.gpsStatusDot.classList.add('bg-emerald-400');
+        el.gpsBadge.className = 'hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-800/60';
+      } else if (status === 'warning' || status === 'sim') {
+        el.gpsStatusDot.classList.add('bg-amber-400');
+        el.gpsBadge.className = 'hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-950/80 text-amber-300 border border-amber-800/60';
+      } else {
+        el.gpsStatusDot.classList.add('bg-rose-500');
+        el.gpsBadge.className = 'hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-950/80 text-rose-300 border border-rose-800/60';
+      }
+    }
+
+    function processNewCoordinate(lat, lng, speedKmh, altitudeM, accuracyM) {
+      const now = Date.now();
+      const currentPt = {
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        speed: Math.max(0, speedKmh || 0),
+        altitude: altitudeM !== null && !isNaN(altitudeM) ? Math.round(altitudeM) : null,
+        accuracy: accuracyM ? Math.round(accuracyM) : 10,
+        timestamp: now
+      };
+
+      const newLatLng = [currentPt.lat, currentPt.lng];
+      userMarker.setLatLng(newLatLng);
+      accuracyCircle.setLatLng(newLatLng);
+      accuracyCircle.setRadius(currentPt.accuracy);
+
+      el.txtCoords.textContent = `${currentPt.lat.toFixed(5)}, ${currentPt.lng.toFixed(5)}`;
+      el.txtAccuracy.textContent = `±${currentPt.accuracy} m`;
+      el.txtAltitude.textContent = currentPt.altitude !== null ? currentPt.altitude : '---';
+      el.txtCurrentSpeed.textContent = currentPt.speed.toFixed(1);
+
+      if (AppState.isRecording && !AppState.isPaused) {
+        if (AppState.routePoints.length > 0) {
+          const prevPt = AppState.routePoints[AppState.routePoints.length - 1];
+          const distIncrement = haversineDistance(prevPt.lat, prevPt.lng, currentPt.lat, currentPt.lng);
+          
+          // Noise filter: ignore micro-jitters under 0.8m
+          if (distIncrement > 0.8) {
+            AppState.totalDistance += distIncrement;
+          }
+        }
+
+        AppState.routePoints.push(currentPt);
+        routePolyline.addLatLng(newLatLng);
+
+        // Speeds
+        AppState.sumSpeed += currentPt.speed;
+        AppState.totalRecordedSpeedPoints++;
+        const avg = AppState.sumSpeed / AppState.totalRecordedSpeedPoints;
+        el.txtAvgSpeed.textContent = `${avg.toFixed(1)} km/h`;
+
+        // Distances
+        const kmTotal = AppState.totalDistance / 1000;
+        el.txtDistanceKm.textContent = kmTotal.toFixed(2);
+        el.txtDistanceMeters.textContent = `${Math.round(AppState.totalDistance)} m`;
+        el.txtWaypointsCount.textContent = `${AppState.routePoints.length} pts`;
+
+        // Real-time trip cost accumulation
+        const costPerKm = calculateTotalCostPerKm();
+        const liveTripCost = kmTotal * costPerKm;
+        el.txtLiveTripCost.textContent = liveTripCost.toFixed(2);
+
+        // Chart Update
+        const timeLabel = new Date().toLocaleTimeString('es-MX', { minute: '2-digit', second: '2-digit' });
+        telemetryChart.data.labels.push(timeLabel);
+        telemetryChart.data.datasets[0].data.push(currentPt.speed);
+        if (telemetryChart.data.labels.length > 30) {
+          telemetryChart.data.labels.shift();
+          telemetryChart.data.datasets[0].data.shift();
+        }
+        telemetryChart.update('none');
+      }
+
+      AppState.currentPosition = currentPt;
+    }
+
+    function startGeolocationWatch() {
+      if (AppState.isSimulation) return;
+
+      if (!('geolocation' in navigator)) {
+        showToast('Navegador sin GPS nativo. Simulador disponible.');
+        return;
+      }
+
+      updateGpsStatusUI('warning', 'Conectando con satélites...');
+
+      AppState.watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          updateGpsStatusUI('active', 'GPS Activo (Alta Precisión)');
+          const c = pos.coords;
+          let speedKmh = 0;
+          if (c.speed !== null && !isNaN(c.speed) && c.speed >= 0) {
+            speedKmh = c.speed * 3.6;
+          } else if (AppState.currentPosition && AppState.isRecording) {
+            const timeDiffSec = (Date.now() - AppState.currentPosition.timestamp) / 1000;
+            if (timeDiffSec > 0.5) {
+              const d = haversineDistance(AppState.currentPosition.lat, AppState.currentPosition.lng, c.latitude, c.longitude);
+              speedKmh = (d / timeDiffSec) * 3.6;
+            }
+          }
+          processNewCoordinate(c.latitude, c.longitude, speedKmh, c.altitude, c.accuracy);
+        },
+        (err) => {
+          console.warn('Geolocation warn:', err);
+          updateGpsStatusUI('error', 'Sin señal satelital');
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 1000 }
+      );
+    }
+
+    const SimulationEngine = {
+      interval: null,
+      currentIndex: 0,
+      targetSpeed: 50,
+      activeScenario: 'cdmx_reforma',
+      scenarios: {
+        cdmx_reforma: [
+          [19.427021, -99.167665, 2240], // Ángel de la Independencia
+          [19.425980, -99.171800, 2241], // Diana Cazadora
+          [19.424500, -99.175500, 2242], // Torre Mayor
+          [19.422000, -99.182000, 2244], // Bosque de Chapultepec
+          [19.429000, -99.187000, 2243], // Polanco - Campos Elíseos
+          [19.432500, -99.191000, 2242], // Masaryk
+          [19.435000, -99.184000, 2241], // Mariano Escobedo
+          [19.431000, -99.173000, 2240]  // Retorno Reforma
+        ],
+        gdl_chapultepec: [
+          [20.673800, -103.368500, 1560], // Av Vallarta & Chapultepec
+          [20.674500, -103.376000, 1562], // Arcos Guadalajara
+          [20.674900, -103.387500, 1565], // Glorieta La Minerva
+          [20.669000, -103.393000, 1567], // Av López Mateos
+          [20.663000, -103.385000, 1563]  // Niños Héroes
+        ],
+        mty_sanpedro: [
+          [25.651500, -100.366000, 640], // Calzada del Valle
+          [25.655000, -100.354000, 660], // Gómez Morín
+          [25.663000, -100.347000, 690], // Puente Atirantado
+          [25.670000, -100.352000, 670], // Constitución
+          [25.658000, -100.372000, 650]
+        ]
+      },
+      start() {
+        if (this.interval) clearInterval(this.interval);
+        AppState.isSimulation = true;
+        if (AppState.watchId) navigator.geolocation.clearWatch(AppState.watchId);
+
+        updateGpsStatusUI('sim', 'Simulación Activa (Demo)');
+        const pts = this.scenarios[this.activeScenario];
+        this.currentIndex = 0;
+        const first = pts[0];
+        map.setView([first[0], first[1]], 16);
+        processNewCoordinate(first[0], first[1], this.targetSpeed, first[2], 5);
+
+        this.interval = setInterval(() => this.step(), 1300);
+      },
+      step() {
+        const pts = this.scenarios[this.activeScenario];
+        this.currentIndex = (this.currentIndex + 1) % pts.length;
+        const pt = pts[this.currentIndex];
+
+        const latJitter = (Math.random() - 0.5) * 0.00014;
+        const lngJitter = (Math.random() - 0.5) * 0.00014;
+        const speedNoise = (Math.random() - 0.5) * 7;
+        const spd = Math.max(10, this.targetSpeed + speedNoise);
+
+        processNewCoordinate(pt[0] + latJitter, pt[1] + lngJitter, spd, pt[2], 4);
+        if (AppState.isRecording) {
+          map.panTo([pt[0] + latJitter, pt[1] + lngJitter], { animate: true });
+        }
+      },
+      stop() {
+        if (this.interval) clearInterval(this.interval);
+        this.interval = null;
+        AppState.isSimulation = false;
+        startGeolocationWatch();
+      }
+    };
+
+    function startRecording() {
+      if (!AppState.isRecording) {
+        AppState.isRecording = true;
+        AppState.isPaused = false;
+        AppState.startTime = Date.now();
+        AppState.elapsedOffset = 0;
+        AppState.routePoints = [];
+        AppState.totalDistance = 0;
+        AppState.sumSpeed = 0;
+        AppState.totalRecordedSpeedPoints = 0;
+
+        routePolyline.setLatLngs([]);
+        if (historyPolyline) {
+          map.removeLayer(historyPolyline);
+          historyPolyline = null;
+        }
+
+        telemetryChart.data.labels = [];
+        telemetryChart.data.datasets[0].data = [];
+        telemetryChart.update();
+
+        showToast('¡Ruta iniciada! Calculando telemetría...');
+      } else if (AppState.isPaused) {
+        AppState.isPaused = false;
+        AppState.startTime = Date.now();
+        showToast('Ruta reanudada');
+      }
+
+      el.recordIndicator.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+      el.txtTripStatus.textContent = 'Grabando';
+      el.txtTripStatus.className = 'text-emerald-400 font-bold';
+
+      el.btnStart.classList.add('hidden');
+      el.btnPause.disabled = false;
+      el.btnStop.disabled = false;
+
+      if (AppState.timerInterval) clearInterval(AppState.timerInterval);
+      AppState.timerInterval = setInterval(() => {
+        if (!AppState.isPaused) {
+          const totalMs = (Date.now() - AppState.startTime) + AppState.elapsedOffset;
+          el.txtDuration.textContent = formatTime(totalMs);
+        }
+      }, 500);
+    }
+
+    function pauseRecording() {
+      if (!AppState.isRecording || AppState.isPaused) return;
+
+      AppState.isPaused = true;
+      AppState.elapsedOffset += (Date.now() - AppState.startTime);
+
+      el.recordIndicator.className = 'w-2 h-2 rounded-full bg-amber-400';
+      el.txtTripStatus.textContent = 'En Pausa';
+      el.txtTripStatus.className = 'text-amber-400 font-bold';
+
+      el.btnStart.classList.remove('hidden');
+      el.btnStartLabel.textContent = 'Reanudar';
+      el.btnPause.disabled = true;
+
+      showToast('Grabación en pausa');
+    }
+
+    // Trigger settlement popup modal
+    function openSettleTripModal() {
+      if (!AppState.isRecording) return;
+
+      // Temporary pause timer while settling
+      pauseRecording();
+
+      const totalMs = (AppState.isPaused ? 0 : (Date.now() - AppState.startTime)) + AppState.elapsedOffset;
+      const km = AppState.totalDistance / 1000;
+      const avgSpeed = AppState.totalRecordedSpeedPoints > 0 ? (AppState.sumSpeed / AppState.totalRecordedSpeedPoints).toFixed(1) : '0.0';
+
+      el.settleTripDistance.textContent = `${km.toFixed(2)} km`;
+      el.settleTripDuration.textContent = formatTime(totalMs);
+      el.settleTripAvgSpeed.textContent = `${avgSpeed} km/h`;
+
+      // Pre-calculate suggested minimum rate or clear
+      el.settleGrossFare.value = '';
+      updateSettlementCalculations(0);
+
+      el.modalSettleTrip.classList.remove('hidden');
+      el.settleGrossFare.focus();
+    }
+
+    // Real-time recalculation inside the settlement modal
+    function updateSettlementCalculations(grossFare) {
+      const km = AppState.totalDistance / 1000;
+      const totalMs = (AppState.isPaused ? 0 : (Date.now() - AppState.startTime)) + AppState.elapsedOffset;
+      const hours = Math.max(0.001, totalMs / (1000 * 3600));
+
+      const commPct = parseFloat(AppState.config.appCommissionPct) || 0;
+      const commDeduction = (grossFare * commPct) / 100;
+
+      const fuelCostPerKm = calculateFuelCostPerKm();
+      const fuelTotal = km * fuelCostPerKm;
+
+      const maintCostPerKm = parseFloat(AppState.config.maintenancePerKm) || 0;
+      const maintTotal = km * maintCostPerKm;
+
+      const netProfit = grossFare - (commDeduction + fuelTotal + maintTotal);
+      const netPerKm = km > 0 ? (netProfit / km) : 0;
+      const netPerHour = netProfit / hours;
+      const margin = grossFare > 0 ? ((netProfit / grossFare) * 100) : 0;
+
+      el.bdGrossFare.textContent = formatCurrency(grossFare);
+      el.bdCommPctLabel.textContent = commPct.toFixed(1);
+      el.bdCommissionDeduction.textContent = `-${formatCurrency(commDeduction)}`;
+      el.bdFuelDeduction.textContent = `-${formatCurrency(fuelTotal)}`;
+      el.bdMaintDeduction.textContent = `-${formatCurrency(maintTotal)}`;
+
+      el.bdNetProfit.textContent = formatCurrency(netProfit);
+      el.bdNetProfit.className = netProfit >= 0 
+        ? 'font-black font-mono text-base text-emerald-400' 
+        : 'font-black font-mono text-base text-rose-400';
+
+      el.bdNetPerKm.textContent = `${formatCurrency(netPerKm)}/km`;
+      el.bdNetPerHour.textContent = `${formatCurrency(netPerHour)}/h`;
+      el.bdProfitMargin.textContent = `${margin.toFixed(1)}%`;
+      el.bdProfitMargin.className = margin >= 40 
+        ? 'font-bold text-emerald-400' 
+        : (margin >= 15 ? 'font-bold text-amber-400' : 'font-bold text-rose-400');
+    }
+
+    el.settleGrossFare.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) || 0;
+      updateSettlementCalculations(val);
+    });
+
+    function saveTripRecord() {
+      const grossFare = parseFloat(el.settleGrossFare.value) || 0;
+      const payMethod = document.querySelector('input[name="payMethod"]:checked')?.value || 'Efectivo';
+      const totalMs = (AppState.isPaused ? 0 : (Date.now() - AppState.startTime)) + AppState.elapsedOffset;
+      const km = AppState.totalDistance / 1000;
+      const hours = Math.max(0.001, totalMs / (1000 * 3600));
+
+      const commPct = parseFloat(AppState.config.appCommissionPct) || 0;
+      const commDeduction = (grossFare * commPct) / 100;
+      const fuelTotal = km * calculateFuelCostPerKm();
+      const maintTotal = km * (parseFloat(AppState.config.maintenancePerKm) || 0);
+      const netProfit = grossFare - (commDeduction + fuelTotal + maintTotal);
+      const avgSpeed = AppState.totalRecordedSpeedPoints > 0 ? (AppState.sumSpeed / AppState.totalRecordedSpeedPoints).toFixed(1) : 0;
+
+      const record = {
+        id: 'trip_' + Date.now(),
+        date: new Date().toISOString(),
+        distanceKm: parseFloat(km.toFixed(2)),
+        distanceM: Math.round(AppState.totalDistance),
+        durationMs: totalMs,
+        avgSpeed: parseFloat(avgSpeed),
+        pointsCount: AppState.routePoints.length,
+        points: AppState.routePoints,
+        finance: {
+          grossFare,
+          paymentMethod: payMethod,
+          commissionPct: commPct,
+          commissionAmount: commDeduction,
+          fuelCostAmount: fuelTotal,
+          maintenanceCostAmount: maintTotal,
+          netProfit,
+          netPerKm: km > 0 ? (netProfit / km) : 0,
+          netPerHour: netProfit / hours,
+          profitMarginPct: grossFare > 0 ? ((netProfit / grossFare) * 100) : 0
+        }
+      };
+
+      AppState.savedRoutes.unshift(record);
+      localStorage.setItem('trackpilot_driver_routes', JSON.stringify(AppState.savedRoutes));
+
+      updateHistoryCount();
+      el.modalSettleTrip.classList.add('hidden');
+      resetTripControls();
+
+      showToast(`Viaje guardado: ${formatCurrency(netProfit)} netos en mano`);
+    }
+
+    function resetTripControls() {
+      AppState.isRecording = false;
+      AppState.isPaused = false;
+      if (AppState.timerInterval) clearInterval(AppState.timerInterval);
+
+      el.recordIndicator.className = 'w-2 h-2 rounded-full bg-slate-600';
+      el.txtTripStatus.textContent = 'Finalizado';
+      el.txtTripStatus.className = 'text-slate-400 font-semibold';
+
+      el.btnStart.classList.remove('hidden');
+      el.btnStartLabel.textContent = 'Iniciar Nueva Ruta';
+      el.btnPause.disabled = true;
+      el.btnStop.disabled = true;
+    }
+
+    function openShiftSummaryModal() {
+      let totalGross = 0;
+      let totalNet = 0;
+      let totalComm = 0;
+      let totalCosts = 0;
+      let totalDistKm = 0;
+
+      AppState.savedRoutes.forEach(r => {
+        if (r.finance) {
+          totalGross += r.finance.grossFare || 0;
+          totalNet += r.finance.netProfit || 0;
+          totalComm += r.finance.commissionAmount || 0;
+          totalCosts += (r.finance.fuelCostAmount || 0) + (r.finance.maintenanceCostAmount || 0);
+          totalDistKm += r.distanceKm || 0;
+        }
+      });
+
+      const avgNetPerKm = totalDistKm > 0 ? (totalNet / totalDistKm) : 0;
+
+      el.shiftNetTotal.textContent = formatCurrency(totalNet);
+      el.shiftGrossTotal.textContent = formatCurrency(totalGross);
+      el.shiftCommissionsTotal.textContent = `-${formatCurrency(totalComm)}`;
+      el.shiftOperCostsTotal.textContent = `-${formatCurrency(totalCosts)}`;
+      el.shiftDistanceTotal.textContent = `${totalDistKm.toFixed(2)} km`;
+      el.shiftAvgNetPerKm.textContent = `${formatCurrency(avgNetPerKm)} /km`;
+
+      el.modalShift.classList.remove('hidden');
+    }
+
+    function loadConfiguration() {
+      try {
+        const stored = localStorage.getItem('trackpilot_driver_cfg');
+        if (stored) {
+          AppState.config = { ...DefaultConfig, ...JSON.parse(stored) };
+        }
+      } catch (e) {
+        AppState.config = { ...DefaultConfig };
+      }
+      populateConfigInputs();
+      updateCostBadges();
+    }
+
+    function populateConfigInputs() {
+      el.cfgFuelEfficiency.value = AppState.config.fuelEfficiencyKmPerL;
+      el.cfgFuelPrice.value = AppState.config.fuelPricePerLiter;
+      el.cfgMaintenancePerKm.value = AppState.config.maintenancePerKm;
+      el.cfgAppCommissionPct.value = AppState.config.appCommissionPct;
+      updateConfigPreview();
+    }
+
+    function updateConfigPreview() {
+      const eff = parseFloat(el.cfgFuelEfficiency.value) || 1;
+      const price = parseFloat(el.cfgFuelPrice.value) || 0;
+      const maint = parseFloat(el.cfgMaintenancePerKm.value) || 0;
+
+      const fuelPerKm = price / eff;
+      const totalKmCost = fuelPerKm + maint;
+
+      el.cfgFuelCostCalculated.textContent = `${formatCurrency(fuelPerKm)} / km`;
+      el.cfgTotalCostPerKm.textContent = `${formatCurrency(totalKmCost)} / km`;
+    }
+
+    function saveConfigFromModal() {
+      AppState.config.fuelEfficiencyKmPerL = Math.max(1, parseFloat(el.cfgFuelEfficiency.value) || 13.5);
+      AppState.config.fuelPricePerLiter = Math.max(0, parseFloat(el.cfgFuelPrice.value) || 24.8);
+      AppState.config.maintenancePerKm = Math.max(0, parseFloat(el.cfgMaintenancePerKm.value) || 0.85);
+      AppState.config.appCommissionPct = Math.max(0, parseFloat(el.cfgAppCommissionPct.value) || 16.23);
+
+      localStorage.setItem('trackpilot_driver_cfg', JSON.stringify(AppState.config));
+      updateCostBadges();
+      el.modalConfig.classList.add('hidden');
+      showToast('Configuración guardada exitosamente');
+    }
+
+    function updateCostBadges() {
+      const totalCost = calculateTotalCostPerKm();
+      el.lblCostPerKmSummary.textContent = `${formatCurrency(totalCost)}`;
+      el.txtLiveRatePerKm.textContent = `${formatCurrency(totalCost)} /km`;
+    }
+
+    // Quick commission preset buttons
+    document.querySelectorAll('.btn-quick-comm').forEach(b => {
+      b.onclick = () => {
+        el.cfgAppCommissionPct.value = b.dataset.val;
+      };
+    });
+
+    [el.cfgFuelEfficiency, el.cfgFuelPrice, el.cfgMaintenancePerKm, el.cfgAppCommissionPct].forEach(inp => {
+      inp.addEventListener('input', updateConfigPreview);
+    });
+
+    function loadSavedRoutes() {
+      try {
+        const stored = localStorage.getItem('trackpilot_driver_routes');
+        if (stored) {
+          AppState.savedRoutes = JSON.parse(stored);
+        }
+      } catch (e) {
+        AppState.savedRoutes = [];
+      }
+      updateHistoryCount();
+    }
+
+    function updateHistoryCount() {
+      const count = AppState.savedRoutes.length;
+      el.historyBadgeCount.textContent = count;
+      el.historyTotalStats.textContent = `${count} ruta${count === 1 ? '' : 's'} guardada${count === 1 ? '' : 's'}`;
+    }
+
+    function renderHistoryModal() {
+      el.historyListContainer.innerHTML = '';
+
+      if (AppState.savedRoutes.length === 0) {
+        el.historyListContainer.innerHTML = `
+          <div class="text-center py-12 text-slate-500">
+            <i data-lucide="map" class="w-12 h-12 mx-auto mb-3 opacity-30"></i>
+            <p class="text-sm font-medium">No hay rutas registradas todavía.</p>
+            <p class="text-xs text-slate-600 mt-1">Realiza un recorrido en vivo o prueba el simulador para liquidar un cobro.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      AppState.savedRoutes.forEach((route) => {
+        const item = document.createElement('div');
+        item.className = 'bg-slate-950/70 p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition flex flex-col md:flex-row md:items-center justify-between gap-3';
+        
+        const dateStr = new Date(route.date).toLocaleString('es-MX', {
+          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        });
+
+        const fin = route.finance || {};
+        const netColor = (fin.netProfit || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
+        item.innerHTML = `
+          <div class="space-y-1.5">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <h4 class="text-sm font-bold text-white">${dateStr}</h4>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">${fin.paymentMethod || 'Efectivo'}</span>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-3 text-xs font-mono text-slate-400">
+              <span>Distancia: <strong class="text-slate-200">${route.distanceKm} km</strong></span>
+              <span>Tiempo: <strong class="text-slate-200">${formatTime(route.durationMs)}</strong></span>
+              <span>Bruto: <strong class="text-slate-200">${formatCurrency(fin.grossFare || 0)}</strong></span>
+              <span>Neto: <strong class="${netColor} font-bold">${formatCurrency(fin.netProfit || 0)}</strong></span>
+              <span class="text-[11px] text-slate-500">(${formatCurrency(fin.netPerKm || 0)}/km)</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 self-end md:self-auto shrink-0">
+            <button class="btn-view-route px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 text-xs font-semibold flex items-center gap-1 transition" data-id="${route.id}">
+              <i data-lucide="eye" class="w-3.5 h-3.5"></i> Ver
+            </button>
+            <button class="btn-gpx px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 transition" data-id="${route.id}">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i> GPX
+            </button>
+            <button class="btn-del px-2 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-300 text-xs transition" data-id="${route.id}">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        `;
+
+        el.historyListContainer.appendChild(item);
+      });
+
+      // Bind dynamic actions
+      el.historyListContainer.querySelectorAll('.btn-view-route').forEach(b => {
+        b.onclick = () => viewRouteOnMap(b.dataset.id);
+      });
+      el.historyListContainer.querySelectorAll('.btn-gpx').forEach(b => {
+        b.onclick = () => {
+          const r = AppState.savedRoutes.find(x => x.id === b.dataset.id);
+          if (r) exportToGPX(r);
+        };
+      });
+      el.historyListContainer.querySelectorAll('.btn-del').forEach(b => {
+        b.onclick = () => deleteRoute(b.dataset.id);
+      });
+
+      lucide.createIcons();
+    }
+
+    function viewRouteOnMap(routeId) {
+      const route = AppState.savedRoutes.find(r => r.id === routeId);
+      if (!route || !route.points.length) return;
+
+      if (historyPolyline) {
+        map.removeLayer(historyPolyline);
+      }
+
+      const latlngs = route.points.map(p => [p.lat, p.lng]);
+      historyPolyline = L.polyline(latlngs, {
+        color: '#f59e0b',
+        weight: 5,
+        opacity: 0.9,
+        dashArray: '8, 8'
+      }).addTo(map);
+
+      map.fitBounds(historyPolyline.getBounds(), { padding: [40, 40] });
+      el.modalHistory.classList.add('hidden');
+      showToast(`Visualizando ruta en amarillo: ${route.distanceKm} km`);
+    }
+
+    function deleteRoute(routeId) {
+      AppState.savedRoutes = AppState.savedRoutes.filter(r => r.id !== routeId);
+      localStorage.setItem('trackpilot_driver_routes', JSON.stringify(AppState.savedRoutes));
+      updateHistoryCount();
+      renderHistoryModal();
+      showToast('Ruta eliminada');
+    }
+
+    function exportToGPX(route) {
+      let gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="TrackPilot Driver MX" xmlns="http://www.topografix.com/GPX/1/1">\n  <trk>\n    <name>Viaje ${new Date(route.date).toLocaleString('es-MX')}</name>\n    <desc>Neto: $${route.finance?.netProfit?.toFixed(2)} MXN - Distancia: ${route.distanceKm} km</desc>\n    <trkseg>\n`;
+      route.points.forEach(pt => {
+        gpx += `      <trkpt lat="${pt.lat}" lon="${pt.lng}">\n`;
+        if (pt.altitude !== null) gpx += `        <ele>${pt.altitude}</ele>\n`;
+        gpx += `        <time>${new Date(pt.timestamp).toISOString()}</time>\n`;
+        gpx += `        <speed>${(pt.speed / 3.6).toFixed(2)}</speed>\n`;
+        gpx += `      </trkpt>\n`;
+      });
+      gpx += `    </trkseg>\n  </trk>\n</gpx>`;
+
+      const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ruta_${route.id}.gpx`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 200);
+      showToast('Descargando archivo GPX');
+    }
+
+    el.btnStart.addEventListener('click', startRecording);
+    el.btnPause.addEventListener('click', pauseRecording);
+    el.btnStop.addEventListener('click', openSettleTripModal);
+
+    // Settlement modal buttons
+    el.btnCancelSettle.addEventListener('click', () => {
+      el.modalSettleTrip.classList.add('hidden');
+      startRecording(); // Resume trip
+    });
+    el.btnDismissSettle.addEventListener('click', () => {
+      el.modalSettleTrip.classList.add('hidden');
+    });
+    el.btnConfirmSaveTrip.addEventListener('click', saveTripRecord);
+
+    // Configuration modal
+    el.btnOpenConfig.addEventListener('click', () => {
+      populateConfigInputs();
+      el.modalConfig.classList.remove('hidden');
+    });
+    el.btnQuickCost.addEventListener('click', () => {
+      populateConfigInputs();
+      el.modalConfig.classList.remove('hidden');
+    });
+    el.btnCloseConfig.addEventListener('click', () => el.modalConfig.classList.add('hidden'));
+    el.btnSaveConfig.addEventListener('click', saveConfigFromModal);
+    el.btnResetConfig.addEventListener('click', () => {
+      AppState.config = { ...DefaultConfig };
+      populateConfigInputs();
+      showToast('Valores reestablecidos a configuración recomendada');
+    });
+
+    // Shift Modal
+    el.btnOpenShiftModal.addEventListener('click', openShiftSummaryModal);
+    el.btnCloseShift.addEventListener('click', () => el.modalShift.classList.add('hidden'));
+    el.btnDismissShift.addEventListener('click', () => el.modalShift.classList.add('hidden'));
+
+    // History Modal
+    el.btnOpenHistory.addEventListener('click', () => {
+      renderHistoryModal();
+      el.modalHistory.classList.remove('hidden');
+    });
+    el.btnCloseHistory.addEventListener('click', () => el.modalHistory.classList.add('hidden'));
+    el.btnClearAllHistory.addEventListener('click', () => {
+      AppState.savedRoutes = [];
+      localStorage.removeItem('trackpilot_driver_routes');
+      updateHistoryCount();
+      renderHistoryModal();
+      if (historyPolyline) {
+        map.removeLayer(historyPolyline);
+        historyPolyline = null;
+      }
+      showToast('Historial completo eliminado');
+    });
+
+    // Simulation Modal
+    el.btnToggleSimModal.addEventListener('click', () => el.modalSimulator.classList.remove('hidden'));
+    el.btnCloseSimModal.addEventListener('click', () => el.modalSimulator.classList.add('hidden'));
+    el.btnCancelSim.addEventListener('click', () => el.modalSimulator.classList.add('hidden'));
+    el.simSpeedSlider.addEventListener('input', (e) => {
+      el.simSpeedValue.textContent = `${e.target.value} km/h`;
+    });
+    el.btnApplySim.addEventListener('click', () => {
+      SimulationEngine.activeScenario = el.simScenarioSelect.value;
+      SimulationEngine.targetSpeed = parseInt(el.simSpeedSlider.value, 10);
+      SimulationEngine.start();
+      el.modalSimulator.classList.add('hidden');
+      showToast(`Simulador activo: ${el.simScenarioSelect.options[el.simScenarioSelect.selectedIndex].text}`);
+    });
+
+    // Map Center & Layer Switcher
+    el.btnCenterMap.addEventListener('click', () => {
+      if (AppState.currentPosition) {
+        map.setView([AppState.currentPosition.lat, AppState.currentPosition.lng], 16, { animate: true });
+        showToast('Mapa centrado en tu posición');
+      } else {
+        showToast('Esperando ubicación válida...');
+      }
+    });
+
+    el.btnToggleLayer.addEventListener('click', () => {
+      map.removeLayer(currentTileLayer);
+      AppState.mapTileIndex = (AppState.mapTileIndex + 1) % baseLayers.length;
+      const nextLayer = baseLayers[AppState.mapTileIndex];
+      currentTileLayer = L.tileLayer(nextLayer.url, {
+        attribution: nextLayer.attribution,
+        maxZoom: 19
+      }).addTo(map);
+      showToast(`Capa de mapa: ${nextLayer.name}`);
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadConfiguration();
+      loadSavedRoutes();
+      startGeolocationWatch();
+
+      setTimeout(() => {
+        if (!AppState.currentPosition && !AppState.isSimulation) {
+          showToast('Consejo: Puedes presionar "Demo" para probar con recorridos sintéticos en CDMX o Guadalajara.');
+        }
+      }, 4000);
+    });
+  </script>
+</body>
+</html>
